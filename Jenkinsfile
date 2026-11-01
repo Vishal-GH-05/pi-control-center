@@ -1,3 +1,4 @@
+
 pipeline {
     agent any
 
@@ -10,10 +11,24 @@ pipeline {
 
         stage('Backend Test') {
             steps {
-                sh '''
-                    chmod +x mvnw
-                    ./mvnw clean verify
-                '''
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'pi-control-postgres',
+                        usernameVariable: 'SPRING_DATASOURCE_USERNAME',
+                        passwordVariable: 'SPRING_DATASOURCE_PASSWORD'
+                    )
+                ]) {
+                    withEnv([
+                        'SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/pi-control-center',
+                        'SPRING_DATA_REDIS_HOST=127.0.0.1',
+                        'SPRING_DATA_REDIS_PORT=6379'
+                    ]) {
+                        sh '''
+                            chmod +x mvnw
+                            ./mvnw clean verify
+                        '''
+                    }
+                }
             }
         }
 
