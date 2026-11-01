@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import './App.css';
+
 import { currentApi, historyApi } from './api/metricsApi';
+
 import type {
   CpuStats,
   FileSystemStats,
@@ -9,6 +11,7 @@ import type {
   NetworkStats,
   SensorStats,
 } from './types/current';
+
 import type {
   CpuHistory,
   LoadHistory,
@@ -17,7 +20,7 @@ import type {
   SensorHistory,
 } from './types/history';
 
-type CurrentState = {
+type CurrentMetrics = {
   cpu: CpuStats | null;
   memory: MemoryStats | null;
   load: LoadStats | null;
@@ -27,7 +30,7 @@ type CurrentState = {
   uptime: string | null;
 };
 
-type HistoryState = {
+type HistoricalMetrics = {
   cpu: CpuHistory[];
   memory: MemoryHistory[];
   load: LoadHistory[];
@@ -35,7 +38,7 @@ type HistoryState = {
   sensor: SensorHistory[];
 };
 
-const emptyCurrent: CurrentState = {
+const emptyCurrent: CurrentMetrics = {
   cpu: null,
   memory: null,
   load: null,
@@ -45,7 +48,7 @@ const emptyCurrent: CurrentState = {
   uptime: null,
 };
 
-const emptyHistory: HistoryState = {
+const emptyHistory: HistoricalMetrics = {
   cpu: [],
   memory: [],
   load: [],
@@ -53,7 +56,7 @@ const emptyHistory: HistoryState = {
   sensor: [],
 };
 
-function formatBytes(bytes?: number) {
+function formatBytes(bytes?: number | null): string {
   if (bytes == null || !Number.isFinite(bytes)) return '—';
 
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -68,12 +71,15 @@ function formatBytes(bytes?: number) {
   return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`;
 }
 
-function formatRate(value?: number) {
-  if (value == null || !Number.isFinite(value)) return '—';
-  return `${formatBytes(value)}/s`;
+function formatRate(value?: number | null): string {
+  return value == null || !Number.isFinite(value)
+      ? '—'
+      : `${formatBytes(value)}/s`;
 }
 
-function formatTime(value: string) {
+function shortTime(value?: string): string {
+  if (!value) return '';
+
   const date = new Date(value);
 
   return Number.isNaN(date.getTime())
@@ -84,146 +90,206 @@ function formatTime(value: string) {
       });
 }
 
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) {
+    return <div className="sparkline-empty" />;
+  }
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(max - min, 1);
+
+  const points = values
+      .map((value, index) => {
+        const x = (index / (values.length - 1)) * 280;
+        const y = 34 - ((value - min) / range) * 27;
+
+        return `${x},${y}`;
+      })
+      .join(' ');
+
+  return (
+      <svg
+          className="sparkline"
+          viewBox="0 0 280 38"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+      >
+        <polyline
+            points={points}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        />
+      </svg>
+  );
+}
+
 function MetricCard({
-                      label,
+                      title,
                       value,
                       unit,
                       detail,
-                      icon,
                       tone,
+                      icon,
+                      trend,
                     }: {
-  label: string;
-  value: string | number;
+  title: string;
+  value: string;
   unit?: string;
   detail: string;
+  tone: 'purple' | 'green' | 'orange' | 'cyan';
   icon: string;
-  tone: string;
+  trend: number[];
 }) {
   return (
-      <article className="metric-card">
-        <div className="metric-card-top">
-          <span className="metric-label">{label}</span>
-          <span className={`metric-icon ${tone}`}>{icon}</span>
+      <article className={`metric-card ${tone}`}>
+        <div className="metric-topline">
+          <h2>{title}</h2>
+          <span className="metric-symbol" aria-hidden="true">
+          {icon}
+        </span>
         </div>
 
-        <div className="metric-value">
+        <div className="metric-number">
           {value}
           <span>{unit}</span>
         </div>
 
-        <div className="metric-detail">{detail}</div>
+        <p>{detail}</p>
+
+        <Sparkline values={trend} />
       </article>
   );
 }
 
-function MiniChart({
-                     title,
-                     subtitle,
-                     points,
-                     series,
-                   }: {
+function HistoryChart({
+                        title,
+                        description,
+                        rows,
+                        series,
+                        maxValue,
+                      }: {
   title: string;
-  subtitle: string;
-  points: Array<{ recordedAt: string; [key: string]: string | number }>;
-  series: Array<{ key: string; label: string; color: string }>;
+  description?: string;
+  rows: Array<{
+    recordedAt: string;
+    [key: string]: string | number;
+  }>;
+  series: Array<{
+    key: string;
+    label: string;
+    color: string;
+  }>;
+  maxValue?: number;
 }) {
-  const width = 620;
-  const height = 190;
-  const pad = 12;
+  const width = 700;
+  const height = 220;
+  const left = 38;
+  const right = 8;
+  const top = 12;
+  const bottom = 24;
 
-  const values = points.flatMap((point) =>
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+
+  const values = rows.flatMap((row) =>
       series
-          .map((item) => Number(point[item.key]))
+          .map((item) => Number(row[item.key]))
           .filter(Number.isFinite),
   );
 
-  const max = Math.max(100, ...values, 1);
+  const ceiling = maxValue ?? Math.max(1, ...values) * 1.15;
 
-  const paths = series.map((item) => {
-    const coords = points
-        .map((point, index) => {
-          const x =
-              points.length < 2
-                  ? width / 2
-                  : pad + (index / (points.length - 1)) * (width - pad * 2);
+  const makePath = (key: string) =>
+      rows
+          .map((row, index) => {
+            const x =
+                left +
+                (rows.length < 2
+                    ? plotWidth / 2
+                    : (index / (rows.length - 1)) * plotWidth);
 
-          const y =
-              height -
-              pad -
-              ((Math.max(0, Number(point[item.key]) || 0) / max) *
-                  (height - pad * 2));
+            const value = Math.max(0, Number(row[key]) || 0);
+            const y =
+                top + plotHeight - (value / ceiling) * plotHeight;
 
-          return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
-        })
-        .join(' ');
-
-    return { ...item, coords };
-  });
+            return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
+          })
+          .join(' ');
 
   return (
-      <article className="panel history-chart">
+      <article className="panel chart-panel">
         <div className="panel-heading">
           <div>
             <h2>{title}</h2>
-            <p>{subtitle}</p>
+            {description && <p>{description}</p>}
           </div>
 
-          <span className="placeholder-badge">
-          {points.length} records
-        </span>
+          <span className="chart-tag">HISTORY</span>
         </div>
 
-        {points.length === 0 ? (
-            <div className="history-empty">
-              No historical records returned yet.
+        {rows.length === 0 ? (
+            <div className="chart-empty">
+              Historical records will appear here when available.
             </div>
         ) : (
-            <div className="history-plot">
-              <svg
-                  viewBox={`0 0 ${width} ${height}`}
-                  role="img"
-                  aria-label={`${title} history chart`}
-              >
-                {[0, 1, 2, 3].map((line) => (
-                    <line
-                        key={line}
-                        x1="0"
-                        x2={width}
-                        y1={pad + line * ((height - pad * 2) / 3)}
-                        y2={pad + line * ((height - pad * 2) / 3)}
-                        className="chart-rule"
-                    />
-                ))}
+            <>
+              <div className="chart-canvas">
+                <svg
+                    viewBox={`0 0 ${width} ${height}`}
+                    role="img"
+                    aria-label={`${title} history chart`}
+                >
+                  {[0, 1, 2, 3].map((tick) => {
+                    const y = top + (tick / 3) * plotHeight;
 
-                {paths.map((path) => (
-                    <path
-                        key={path.key}
-                        d={path.coords}
-                        fill="none"
-                        stroke={path.color}
-                        strokeWidth="2.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                    />
-                ))}
-              </svg>
+                    return (
+                        <line
+                            key={tick}
+                            x1={left}
+                            x2={width - right}
+                            y1={y}
+                            y2={y}
+                            className="grid-line"
+                        />
+                    );
+                  })}
 
-              <div className="chart-axis">
-                <span>{formatTime(points[0].recordedAt)}</span>
+                  {series.map((item) => (
+                      <path
+                          key={item.key}
+                          d={makePath(item.key)}
+                          fill="none"
+                          stroke={item.color}
+                          strokeWidth="3"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                      />
+                  ))}
+                </svg>
+              </div>
+
+              <div className="chart-times">
+                <span>{shortTime(rows[0]?.recordedAt)}</span>
                 <span>
-              {formatTime(points[points.length - 1].recordedAt)}
+              {shortTime(
+                  rows[Math.floor(rows.length / 2)]?.recordedAt,
+              )}
+            </span>
+                <span>
+              {shortTime(rows[rows.length - 1]?.recordedAt)}
             </span>
               </div>
-            </div>
+            </>
         )}
 
         <div className="chart-legend">
           {series.map((item) => (
               <span key={item.key}>
-            <i
-                className="legend-dot"
-                style={{ background: item.color }}
-            />
+            <i style={{ background: item.color }} />
                 {item.label}
           </span>
           ))}
@@ -232,15 +298,91 @@ function MiniChart({
   );
 }
 
-function App() {
-  const [current, setCurrent] = useState<CurrentState>(emptyCurrent);
-  const [history, setHistory] = useState<HistoryState>(emptyHistory);
+function MemoryPanel({
+                       memory,
+                     }: {
+  memory: MemoryStats | null;
+}) {
+  const percent = Math.max(
+      0,
+      Math.min(100, memory?.percent ?? 0),
+  );
 
-  const [currentError, setCurrentError] = useState<string | null>(null);
-  const [historyError, setHistoryError] = useState<string | null>(null);
+  return (
+      <article className="panel memory-panel">
+        <div className="panel-heading">
+          <div>
+            <h2>Memory Usage</h2>
+            <p>RAM utilization</p>
+          </div>
+        </div>
 
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-  const [connected, setConnected] = useState(false);
+        <div className="memory-layout">
+          <div
+              className="memory-donut"
+              style={{
+                background: `conic-gradient(#9865ff ${percent}%, #34343e 0)`,
+              }}
+          >
+            <div>
+              <strong>
+                {memory ? `${percent.toFixed(1)}%` : '—'}
+              </strong>
+              <span>utilized</span>
+            </div>
+          </div>
+
+          <div className="memory-keys">
+            <div>
+              <i className="used-dot" />
+              <span>
+              Used
+              <strong>
+                {memory ? formatBytes(memory.used) : '—'}
+              </strong>
+            </span>
+            </div>
+
+            <div>
+              <i className="free-dot" />
+              <span>
+              Free
+              <strong>
+                {memory ? formatBytes(memory.free) : '—'}
+              </strong>
+            </span>
+            </div>
+
+            <div>
+              <i className="total-dot" />
+              <span>
+              Total
+              <strong>
+                {memory ? formatBytes(memory.total) : '—'}
+              </strong>
+            </span>
+            </div>
+          </div>
+        </div>
+      </article>
+  );
+}
+
+export default function App() {
+  const [current, setCurrent] =
+      useState<CurrentMetrics>(emptyCurrent);
+
+  const [history, setHistory] =
+      useState<HistoricalMetrics>(emptyHistory);
+
+  const [apiOnline, setApiOnline] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [currentError, setCurrentError] = useState<string | null>(
+      null,
+  );
+  const [historyError, setHistoryError] = useState<string | null>(
+      null,
+  );
 
   const refreshCurrent = useCallback(async () => {
     const results = await Promise.allSettled([
@@ -264,37 +406,48 @@ function App() {
     ] = results;
 
     const failures = results.filter(
-        (result) => result.status === 'rejected',
+        (item) => item.status === 'rejected',
     ).length;
 
     setCurrent((previous) => ({
       cpu: cpu.status === 'fulfilled' ? cpu.value : previous.cpu,
       memory:
-          memory.status === 'fulfilled' ? memory.value : previous.memory,
-      load: load.status === 'fulfilled' ? load.value : previous.load,
+          memory.status === 'fulfilled'
+              ? memory.value
+              : previous.memory,
+      load:
+          load.status === 'fulfilled' ? load.value : previous.load,
       network:
-          network.status === 'fulfilled' ? network.value : previous.network,
+          network.status === 'fulfilled'
+              ? network.value
+              : previous.network,
       filesystem:
           filesystem.status === 'fulfilled'
               ? filesystem.value
               : previous.filesystem,
       sensor:
-          sensor.status === 'fulfilled' ? sensor.value : previous.sensor,
+          sensor.status === 'fulfilled'
+              ? sensor.value
+              : previous.sensor,
       uptime:
-          uptime.status === 'fulfilled' ? uptime.value : previous.uptime,
+          uptime.status === 'fulfilled'
+              ? uptime.value
+              : previous.uptime,
     }));
 
-    setConnected(results.some((result) => result.status === 'fulfilled'));
+    setApiOnline(
+        results.some((item) => item.status === 'fulfilled'),
+    );
 
     setCurrentError(
         failures === results.length
-            ? 'Could not reach the Spring Boot API. Check that it is running on port 8080 and CORS is configured.'
+            ? 'Unable to reach the backend API. Check the connection.'
             : failures > 0
-                ? `${failures} current metric request(s) failed. Check Redis data and backend logs.`
+                ? `${failures} current metric request(s) failed.`
                 : null,
     );
 
-    setLastUpdated(new Date());
+    setUpdatedAt(new Date());
   }, []);
 
   const refreshHistory = useCallback(async () => {
@@ -309,24 +462,29 @@ function App() {
     const [cpu, memory, load, network, sensor] = results;
 
     const failures = results.filter(
-        (result) => result.status === 'rejected',
+        (item) => item.status === 'rejected',
     ).length;
 
     setHistory((previous) => ({
       cpu: cpu.status === 'fulfilled' ? cpu.value : previous.cpu,
       memory:
-          memory.status === 'fulfilled' ? memory.value : previous.memory,
-      load: load.status === 'fulfilled' ? load.value : previous.load,
+          memory.status === 'fulfilled'
+              ? memory.value
+              : previous.memory,
+      load:
+          load.status === 'fulfilled' ? load.value : previous.load,
       network:
-          network.status === 'fulfilled' ? network.value : previous.network,
+          network.status === 'fulfilled'
+              ? network.value
+              : previous.network,
       sensor:
-          sensor.status === 'fulfilled' ? sensor.value : previous.sensor,
+          sensor.status === 'fulfilled'
+              ? sensor.value
+              : previous.sensor,
     }));
 
     setHistoryError(
-        failures
-            ? `${failures} historical request(s) failed. Check the historical controller and PostgreSQL.`
-            : null,
+        failures ? `${failures} historical request(s) failed.` : null,
     );
   }, []);
 
@@ -342,177 +500,167 @@ function App() {
     return () => window.clearInterval(timer);
   }, [refreshCurrent, refreshHistory]);
 
-  const services = [
-    {
-      name: 'Spring Boot API',
-      description: 'REST endpoints',
-      status: connected ? 'Connected' : 'Not connected',
-      online: connected,
-    },
-    {
-      name: 'Redis',
-      description: 'Current metrics store',
-      status:
-          current.cpu || current.memory ? 'Data available' : 'Not verified',
-      online: Boolean(current.cpu || current.memory),
-    },
-    {
-      name: 'PostgreSQL',
-      description: 'Historical metrics store',
-      status:
-          history.cpu.length || history.memory.length
-              ? 'Data available'
-              : 'Not verified',
-      online: history.cpu.length + history.memory.length > 0,
-    },
-  ];
+  const cpuTrend = useMemo(
+      () => history.cpu.slice(-35).map((row) => row.total),
+      [history.cpu],
+  );
 
-  const latestCpu = history.cpu.slice(-60);
-  const latestMemory = history.memory.slice(-60);
+  const memoryTrend = useMemo(
+      () => history.memory.slice(-35).map((row) => row.percent),
+      [history.memory],
+  );
 
-  const cpuPoints = latestCpu.map((item) => ({
-    recordedAt: item.recordedAt,
-    total: item.total,
-    user: item.user,
+  const loadTrend = useMemo(
+      () => history.load.slice(-35).map((row) => row.min1),
+      [history.load],
+  );
+
+  const networkTrend = useMemo(
+      () =>
+          history.network
+              .slice(-35)
+              .map((row) => row.recvRatePerSec),
+      [history.network],
+  );
+
+  const cpuRows = history.cpu.slice(-60).map((row) => ({
+    recordedAt: row.recordedAt,
+    total: row.total,
   }));
 
-  const memoryPoints = latestMemory.map((item) => ({
-    recordedAt: item.recordedAt,
-    percent: item.percent,
+  const loadRows = history.load.slice(-60).map((row) => ({
+    recordedAt: row.recordedAt,
+    min1: row.min1,
+    min5: row.min5,
+    min15: row.min15,
   }));
+
+  const memoryRows = history.memory.slice(-60).map(
+      (row: MemoryHistory) => ({
+        recordedAt: row.recordedAt,
+        percent: row.percent,
+      }),
+  );
+
+  const networkRows = history.network.slice(-60).map(
+      (row: NetworkHistory) => ({
+        recordedAt: row.recordedAt,
+        receive: row.recvRatePerSec,
+      }),
+  );
+
+  const sensorRows = history.sensor.slice(-60).map(
+      (row: SensorHistory) => ({
+        recordedAt: row.recordedAt,
+        temperature: row.value,
+      }),
+  );
+
+  const networkValue = current.network
+      ? `${formatRate(current.network.recvRatePerSec)} / ${formatRate(
+          current.network.sentRatePerSec,
+      )}`
+      : '—';
 
   return (
       <div className="app-shell">
         <aside className="sidebar">
-          <a
-              className="brand"
-              href="#overview"
-              aria-label="Pi Control Center home"
-          >
-            <span className="brand-mark">π</span>
-            <span>
-            Pi Control<span className="brand-muted"> Center</span>
-          </span>
-          </a>
-
-          <div className="nav-label">WORKSPACE</div>
-
-          <nav className="navigation" aria-label="Main navigation">
-            <a className="nav-item active" href="#overview">
-              <span>▦</span> Overview
-            </a>
-            <a className="nav-item" href="#performance">
-              <span>⌁</span> Performance
-            </a>
-            <a className="nav-item" href="#network">
-              <span>⌘</span> Network
-            </a>
-            <a className="nav-item" href="#storage">
-              <span>▤</span> Storage
-            </a>
-          </nav>
-
-          <div className="nav-label infrastructure-label">
-            INFRASTRUCTURE
-          </div>
+          <div className="brand-slot" aria-label="Logo placeholder" />
 
           <nav
-              className="navigation"
-              aria-label="Infrastructure navigation"
+              className="sidebar-nav"
+              aria-label="Dashboard navigation"
           >
-            <a className="nav-item" href="#services">
-              <span>◈</span> Services
+            <a className="nav-item selected" href="#overview">
+              <span>⌂</span>
+              <b>Overview</b>
             </a>
+
             <a className="nav-item" href="#history">
-              <span>◷</span> History
+              <span>▤</span>
+              <b>History</b>
+            </a>
+
+            <a className="nav-item" href="#system">
+              <span>⚙</span>
+              <b>System</b>
+            </a>
+
+            <a className="nav-item" href="#about">
+              <span>ⓘ</span>
+              <b>About</b>
             </a>
           </nav>
 
-          <div className="sidebar-bottom">
-            <div className="pi-avatar">π</div>
-            <div className="sidebar-device">
+          <div className="sidebar-device">
+            <div
+                className="device-image-slot"
+                aria-label="Device image placeholder"
+            />
+
+            <div className="device-label">
               <strong>Raspberry Pi</strong>
               <span>Control node</span>
             </div>
-            <span className="more-icon">···</span>
+
+            <span className="more-dots">···</span>
           </div>
         </aside>
 
         <main className="main-content" id="overview">
           <header className="topbar">
-            <div className="breadcrumb">
-              Workspace <span>/</span> <strong>Overview</strong>
+            <div>
+              <p className="eyebrow">SYSTEM MONITOR</p>
+              <h1>
+                Pi Control <span>Center</span>
+              </h1>
             </div>
 
-            <div className="topbar-right">
-            <span className="environment">
-              <span
-                  className={`environment-dot ${connected ? 'online' : ''}`}
-              />
-              {connected ? 'API connected' : 'Local environment'}
+            <div className="topbar-status">
+            <span
+                className={`status-dot ${
+                    apiOnline ? 'is-online' : ''
+                }`}
+            />
+
+              <span>
+              {apiOnline ? 'System online' : 'Connecting'}
             </span>
 
-              <button
-                  className="icon-button"
-                  type="button"
-                  aria-label="Refresh metrics"
-                  onClick={() => {
-                    void refreshCurrent();
-                    void refreshHistory();
-                  }}
-              >
-                ↻
-              </button>
-
-              <div className="user-avatar">V</div>
+              <span className="status-divider" />
+              <span className="poll-label">Refresh · 5s</span>
             </div>
           </header>
 
-          <div className="page-content">
-            <section className="page-heading">
-              <div>
-                <div className="eyebrow">SYSTEM MONITORING</div>
-                <h1>Overview</h1>
-                <p className="page-description">
-                  Monitor your Raspberry Pi's health and performance.
-                </p>
-              </div>
-
-              <div className="updated-label">
-              <span
-                  className={`status-dot ${connected ? 'online' : ''}`}
-              />
-                {lastUpdated
-                    ? `Updated ${lastUpdated.toLocaleTimeString()}`
-                    : 'Connecting to backend'}
-              </div>
-            </section>
-
+          <div className="content-wrap">
             {currentError && (
-                <div className="api-alert" role="status">
-                  {currentError}
-                </div>
+                <div className="error-banner">{currentError}</div>
             )}
 
             <section
-                className="metrics-grid"
-                aria-label="Current system metrics"
+                className="metric-grid"
+                aria-label="Live system metrics"
             >
               <MetricCard
-                  label="CPU Usage"
-                  value={current.cpu ? current.cpu.total.toFixed(1) : '—'}
+                  title="CPU Usage"
+                  value={
+                    current.cpu ? current.cpu.total.toFixed(1) : '—'
+                  }
                   unit="%"
                   detail={
                     current.cpu
-                        ? `${current.cpu.cores} cores · user ${current.cpu.user.toFixed(1)}% · I/O wait ${current.cpu.iowait.toFixed(1)}%`
-                        : 'Waiting for Redis data'
+                        ? `${current.cpu.cores} cores · User ${current.cpu.user.toFixed(
+                            1,
+                        )}%`
+                        : 'Waiting for metrics'
                   }
-                  icon="◫"
-                  tone="blue"
+                  tone="purple"
+                  icon="▦"
+                  trend={cpuTrend}
               />
 
               <MetricCard
-                  label="Memory Usage"
+                  title="Memory Usage"
                   value={
                     current.memory
                         ? current.memory.percent.toFixed(1)
@@ -521,124 +669,175 @@ function App() {
                   unit="%"
                   detail={
                     current.memory
-                        ? `${formatBytes(current.memory.used)} used of ${formatBytes(current.memory.total)}`
-                        : 'Waiting for Redis data'
+                        ? `${formatBytes(current.memory.used)} in use`
+                        : 'Waiting for metrics'
                   }
-                  icon="▤"
-                  tone="purple"
-              />
-
-              <MetricCard
-                  label="CPU Temperature"
-                  value={current.sensor?.value ?? '—'}
-                  unit={current.sensor?.unit ?? ''}
-                  detail={
-                      current.sensor?.label ?? 'Waiting for sensor data'
-                  }
-                  icon="♨"
-                  tone="orange"
-              />
-
-              <MetricCard
-                  label="System Uptime"
-                  value={current.uptime ?? '—'}
-                  detail="From Redis current state"
-                  icon="◷"
                   tone="green"
+                  icon="▤"
+                  trend={memoryTrend}
+              />
+
+              <MetricCard
+                  title="Load Average"
+                  value={
+                    current.load ? current.load.min1.toFixed(2) : '—'
+                  }
+                  detail={
+                    current.load
+                        ? `5m ${current.load.min5.toFixed(
+                            2,
+                        )} · 15m ${current.load.min15.toFixed(2)}`
+                        : 'Waiting for metrics'
+                  }
+                  tone="orange"
+                  icon="⌁"
+                  trend={loadTrend}
+              />
+
+              <MetricCard
+                  title="Network Traffic"
+                  value={networkValue}
+                  detail={current.network?.name ?? 'Waiting for metrics'}
+                  tone="cyan"
+                  icon="⌁"
+                  trend={networkTrend}
               />
             </section>
 
-            <section className="content-grid" id="performance">
-              <article className="panel performance-panel">
-                <div className="panel-heading">
+            <section className="main-grid">
+              <HistoryChart
+                  title="CPU Performance"
+                  description="Processor utilization over time"
+                  rows={cpuRows}
+                  series={[
+                    {
+                      key: 'total',
+                      label: 'CPU usage',
+                      color: '#9865ff',
+                    },
+                  ]}
+                  maxValue={100}
+              />
+
+              <article className="panel device-panel">
+                <div className="device-panel-head">
                   <div>
-                    <h2>Current performance</h2>
-                    <p>Latest values from Redis</p>
-                  </div>
-                  <span className="placeholder-badge">5 sec polling</span>
-                </div>
-
-                <div className="live-metrics">
-                  <div>
-                    <span>Load average</span>
-                    <strong>
-                      {current.load
-                          ? `${current.load.min1.toFixed(2)} / ${current.load.min5.toFixed(2)} / ${current.load.min15.toFixed(2)}`
-                          : '—'}
-                    </strong>
-                    <small>1, 5 and 15 minutes</small>
+                    <p className="eyebrow">DEVICE STATUS</p>
+                    <h2>Raspberry Pi</h2>
                   </div>
 
-                  <div id="network">
-                    <span>Network interface</span>
-                    <strong>{current.network?.name ?? '—'}</strong>
-                    <small>
-                      Receive {formatRate(current.network?.recvRatePerSec)} ·
-                      Send {formatRate(current.network?.sentRatePerSec)}
-                    </small>
-                  </div>
-
-                  <div>
-                    <span>Filesystem</span>
-                    <strong>
-                      {current.filesystem?.deviceName ?? '—'}
-                    </strong>
-                    <small>
-                      {current.filesystem
-                          ? `${current.filesystem.percent.toFixed(1)}% used · ${formatBytes(current.filesystem.free)} free`
-                          : 'Waiting for Redis data'}
-                    </small>
-                  </div>
-                </div>
-              </article>
-
-              <article className="panel services-panel" id="services">
-                <div className="panel-heading">
-                  <div>
-                    <h2>Service health</h2>
-                    <p>Observed through successful API responses</p>
-                  </div>
-
-                  <span className="service-count">
-                  {services.filter((service) => service.online).length}/3
+                  <span className="online-pill">
+                  <i />
+                  Online
                 </span>
                 </div>
 
-                <div className="service-list">
-                  {services.map((service) => (
-                      <div className="service-row" key={service.name}>
-                        <div className="service-symbol">◇</div>
-
-                        <div className="service-info">
-                          <strong>{service.name}</strong>
-                          <span>{service.description}</span>
-                        </div>
-
-                        <span
-                            className={`service-status ${service.online ? 'online-text' : ''}`}
-                        >
-                      {service.status}
-                    </span>
-                      </div>
-                  ))}
+                <div className="device-row">
+                  <span>Uptime</span>
+                  <strong>{current.uptime ?? '—'}</strong>
                 </div>
 
-                <div className="panel-footer">
-                  Redis and PostgreSQL status is inferred from metric
-                  responses, not a direct health check.
+                <div className="device-row">
+                  <span>CPU temperature</span>
+                  <strong>
+                    {current.sensor
+                        ? `${current.sensor.value} ${current.sensor.unit}`
+                        : '—'}
+                  </strong>
                 </div>
+
+                <div className="device-row">
+                  <span>CPU cores</span>
+                  <strong>{current.cpu?.cores ?? '—'}</strong>
+                </div>
+
+                <div className="device-row">
+                  <span>Filesystem usage</span>
+                  <strong>
+                    {current.filesystem
+                        ? `${current.filesystem.percent.toFixed(1)}%`
+                        : '—'}
+                  </strong>
+                </div>
+
+                <div className="device-updated">
+                  {updatedAt
+                      ? `Last updated ${updatedAt.toLocaleTimeString()}`
+                      : 'Waiting for first update'}
+                </div>
+              </article>
+            </section>
+
+            <section className="lower-grid">
+              <MemoryPanel memory={current.memory} />
+
+              <HistoryChart
+                  title="System Load"
+                  description="1, 5 and 15 minute averages"
+                  rows={loadRows}
+                  series={[
+                    {
+                      key: 'min1',
+                      label: '1 min',
+                      color: '#39bdf5',
+                    },
+                    {
+                      key: 'min5',
+                      label: '5 min',
+                      color: '#9865ff',
+                    },
+                    {
+                      key: 'min15',
+                      label: '15 min',
+                      color: '#f5a044',
+                    },
+                  ]}
+              />
+
+              <article className="panel temperature-panel">
+                <div className="temperature-title">
+                  <span className="temperature-icon">♨</span>
+                  <div>
+                    <h2>CPU Temperature</h2>
+                    <p>Thermal sensor</p>
+                  </div>
+                </div>
+
+                <strong>
+                  {current.sensor
+                      ? `${current.sensor.value} ${current.sensor.unit}`
+                      : '—'}
+                </strong>
+
+                <div className="temperature-meter">
+                <span
+                    style={{
+                      width: `${Math.min(
+                          100,
+                          Math.max(
+                              0,
+                              Number(current.sensor?.value ?? 0) * 1.5,
+                          ),
+                      )}%`,
+                    }}
+                />
+                </div>
+
+                <small>
+                  {current.sensor?.label ?? 'Waiting for sensor data'}
+                </small>
               </article>
             </section>
 
             <section className="history-section" id="history">
               <div className="section-heading">
                 <div>
-                  <h2>Historical performance</h2>
-                  <p>Records returned by PostgreSQL</p>
+                  <p className="eyebrow">POSTGRESQL</p>
+                  <h2>Historical Metrics</h2>
+                  <p>Previously collected system data</p>
                 </div>
 
                 <button
-                    className="select-button"
                     type="button"
                     onClick={() => void refreshHistory()}
                 >
@@ -647,162 +846,79 @@ function App() {
               </div>
 
               {historyError && (
-                  <div className="api-alert">{historyError}</div>
+                  <div className="error-banner">{historyError}</div>
               )}
 
               <div className="history-grid">
-                <MiniChart
-                    title="CPU history"
-                    subtitle="Total and user utilization (%)"
-                    points={cpuPoints}
-                    series={[
-                      {
-                        key: 'total',
-                        label: 'Total',
-                        color: '#9b8cff',
-                      },
-                      {
-                        key: 'user',
-                        label: 'User',
-                        color: '#52b8d1',
-                      },
-                    ]}
-                />
-
-                <MiniChart
-                    title="Memory history"
-                    subtitle="Memory utilization (%)"
-                    points={memoryPoints}
+                <HistoryChart
+                    title="Memory History"
+                    rows={memoryRows}
                     series={[
                       {
                         key: 'percent',
-                        label: 'Used',
-                        color: '#52b8d1',
+                        label: 'Memory usage',
+                        color: '#27d69a',
+                      },
+                    ]}
+                    maxValue={100}
+                />
+
+                <HistoryChart
+                    title="Network Receive"
+                    rows={networkRows}
+                    series={[
+                      {
+                        key: 'receive',
+                        label: 'Bytes / sec',
+                        color: '#39bdf5',
                       },
                     ]}
                 />
 
-                <MiniChart
-                    title="Load history"
-                    subtitle="Load averages"
-                    points={history.load.slice(-60).map((item) => ({
-                      recordedAt: item.recordedAt,
-                      min1: item.min1,
-                      min5: item.min5,
-                      min15: item.min15,
-                    }))}
+                <HistoryChart
+                    title="Sensor History"
+                    rows={sensorRows}
                     series={[
                       {
-                        key: 'min1',
-                        label: '1 min',
-                        color: '#9b8cff',
-                      },
-                      {
-                        key: 'min5',
-                        label: '5 min',
-                        color: '#52b8d1',
-                      },
-                      {
-                        key: 'min15',
-                        label: '15 min',
-                        color: '#e5a45c',
-                      },
-                    ]}
-                />
-
-                <MiniChart
-                    title="Network history"
-                    subtitle="Receive and send rates (bytes/sec)"
-                    points={history.network.slice(-60).map((item) => ({
-                      recordedAt: item.recordedAt,
-                      recvRatePerSec: item.recvRatePerSec,
-                      sentRatePerSec: item.sentRatePerSec,
-                    }))}
-                    series={[
-                      {
-                        key: 'recvRatePerSec',
-                        label: 'Receive',
-                        color: '#52b8d1',
-                      },
-                      {
-                        key: 'sentRatePerSec',
-                        label: 'Send',
-                        color: '#9b8cff',
-                      },
-                    ]}
-                />
-
-                <MiniChart
-                    title="Sensor history"
-                    subtitle="Recorded sensor values"
-                    points={history.sensor.slice(-60).map((item) => ({
-                      recordedAt: item.recordedAt,
-                      value: item.value,
-                    }))}
-                    series={[
-                      {
-                        key: 'value',
-                        label: history.sensor[0]?.unit || 'Sensor',
-                        color: '#e5a45c',
+                        key: 'temperature',
+                        label: history.sensor[0]?.unit ?? 'Sensor',
+                        color: '#f5a044',
                       },
                     ]}
                 />
               </div>
             </section>
 
-            <section className="panel system-panel" id="storage">
-              <div className="panel-heading">
-                <div>
-                  <h2>System information</h2>
-                  <p>
-                    Filesystem and network details available from current
-                    metrics
-                  </p>
-                </div>
-
-                <span className="placeholder-badge">
-                {current.filesystem ? 'Data available' : 'Awaiting data'}
-              </span>
+            <section className="system-strip" id="system">
+              <div>
+                <span>Network interface</span>
+                <strong>{current.network?.name ?? '—'}</strong>
               </div>
 
-              <div className="system-info-grid">
-                <div>
-                  <span>Filesystem device</span>
-                  <strong>
-                    {current.filesystem?.deviceName ?? '—'}
-                  </strong>
-                </div>
+              <div>
+                <span>Filesystem device</span>
+                <strong>
+                  {current.filesystem?.deviceName ?? '—'}
+                </strong>
+              </div>
 
-                <div>
-                  <span>Mount point</span>
-                  <strong>{current.filesystem?.mntPoint ?? '—'}</strong>
-                </div>
+              <div>
+                <span>Mount point</span>
+                <strong>{current.filesystem?.mntPoint ?? '—'}</strong>
+              </div>
 
-                <div>
-                  <span>Filesystem size</span>
-                  <strong>{formatBytes(current.filesystem?.size)}</strong>
-                </div>
-
-                <div>
-                  <span>Filesystem used</span>
-                  <strong>
-                    {current.filesystem
-                        ? `${current.filesystem.percent.toFixed(1)}% · ${formatBytes(current.filesystem.used)}`
-                        : '—'}
-                  </strong>
-                </div>
+              <div>
+                <span>Storage available</span>
+                <strong>
+                  {formatBytes(current.filesystem?.free)}
+                </strong>
               </div>
             </section>
 
-            <footer className="page-footer">
-            <span>
-              Pi Control Center <span className="footer-separator">·</span>{' '}
-              System dashboard
-            </span>
-
+            <footer className="footer" id="about">
+              <span>Pi Control Center</span>
               <span>
-              REST API <span className="footer-separator">·</span> No
-              WebSockets
+              REST API <i /> 5-second polling <i /> No WebSockets
             </span>
             </footer>
           </div>
@@ -810,5 +926,3 @@ function App() {
       </div>
   );
 }
-
-export default App;

@@ -58,6 +58,8 @@ public class MetricsCollector {
             persistenceService.persistCpuStats(metricsStore.getCpuStats());
             persistenceService.persistMemoryStats(metricsStore.getMemoryStats());
             persistenceService.persistLoadStats(metricsStore.getLoadStats());
+            persistenceService.persistNetworkStats(metricsStore.getNetworkStats());
+            persistenceService.persistSensorStats(metricsStore.getSensorStats());
         }
 
 
