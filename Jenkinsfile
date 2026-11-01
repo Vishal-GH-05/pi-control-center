@@ -19,7 +19,7 @@ pipeline {
                     )
                 ]) {
                     withEnv([
-                        'SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/pi-control-center',
+                        'SPRING_DATASOURCE_URL=jdbc:postgresql://127.0.0.1:5432/picontrolcentre',
                         'SPRING_DATA_REDIS_HOST=127.0.0.1',
                         'SPRING_DATA_REDIS_PORT=6379'
                     ]) {
