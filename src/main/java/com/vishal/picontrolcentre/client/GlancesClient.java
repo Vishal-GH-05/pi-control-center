@@ -1,6 +1,7 @@
 package com.vishal.picontrolcentre.client;
 
 import com.vishal.picontrolcentre.dto.*;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -12,8 +13,12 @@ public class GlancesClient {
 
     private final RestClient client;
 
-    public GlancesClient(RestClient restClient){
-        this.client = restClient;
+    public GlancesClient(
+            @Value("${glances.base-url}") String baseUrl) {
+
+        this.client = RestClient.builder()
+                .baseUrl(baseUrl)
+                .build();
     }
 
     public GlancesStatusResponse getStatus(){
