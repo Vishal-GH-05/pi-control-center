@@ -15,8 +15,7 @@ import type {
     SensorHistory,
 } from '../types/history';
 
-const API_BASE_URL =
-    import.meta.env.VITE_API_BASE_URL ?? 'http://192.168.1.20:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 async function get<T>(endpoint: string): Promise<T> {
     const response = await fetch(`${API_BASE_URL}${endpoint}`);
