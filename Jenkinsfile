@@ -34,7 +34,11 @@ pipeline {
 
         stage('Build Docker Images') {
             steps {
-                sh 'docker compose build'
+                sh '''
+                    pwd
+                    ls -la
+                    docker compose -f compose.yaml build
+                '''
             }
         }
 
@@ -51,7 +55,7 @@ pipeline {
                         variable: 'SPRING_DATASOURCE_URL'
                     )
                 ]) {
-                    sh 'docker compose up -d --remove-orphans'
+                    sh 'docker compose -f docker/compose.yaml build'
                 }
             }
         }
