@@ -51,7 +51,7 @@ pipeline {
                         variable: 'SPRING_DATASOURCE_URL'
                     )
                 ]) {
-                    sh 'docker compose up -d
+                    sh 'docker compose up -d'
                 }
             }
         }
