@@ -7,6 +7,8 @@ services:
       target: backend
     container_name: pi-control-backend
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       GLANCES_BASE_URL: http://host.docker.internal:61208
       SPRING_DATA_REDIS_HOST: pi-control-redis
