@@ -1,0 +1,39 @@
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend
+    container_name: pi-control-backend
+    restart: unless-stopped
+    environment:
+      SPRING_DATA_REDIS_HOST: pi-control-redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+    expose:
+      - "8080"
+    networks:
+      - pi-control-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+      args:
+        VITE_API_BASE_URL: ""
+    container_name: pi-control-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    networks:
+      - pi-control-network
+
+networks:
+  pi-control-network:
+    external: true
