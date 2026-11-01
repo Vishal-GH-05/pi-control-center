@@ -8,6 +8,7 @@ services:
     container_name: pi-control-backend
     restart: unless-stopped
     environment:
+      GLANCES_BASE_URL: http://host.docker.internal:61208
       SPRING_DATA_REDIS_HOST: pi-control-redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL}
