@@ -918,7 +918,7 @@ export default function App() {
             <footer className="footer" id="about">
               <span>Pi Control Center</span>
               <span>
-              REST API <i /> 5-second polling <i /> No WebSockets
+              REST API <i /> Made with ❤️ by Vishal.
             </span>
             </footer>
           </div>
