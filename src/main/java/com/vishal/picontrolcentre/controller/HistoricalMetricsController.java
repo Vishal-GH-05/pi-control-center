@@ -2,11 +2,12 @@ package com.vishal.picontrolcentre.controller;
 
 import com.vishal.picontrolcentre.entity.*;
 import com.vishal.picontrolcentre.repository.*;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-
 import java.util.List;
 
 @RestController
@@ -29,33 +30,43 @@ public class HistoricalMetricsController {
     }
 
     @GetMapping("/cpu")
-    public ResponseEntity<List<CpuHistory>> getHCpu(){
-        List<CpuHistory> cpuHistory = cpuRepository.findAll();
-        return ResponseEntity.ok(cpuHistory);
+    public ResponseEntity<List<CpuHistory>> getHCpu() {
+        Page<CpuHistory> page =
+                cpuRepository.findAll(PageRequest.of(0, 600));
+
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/load")
     public ResponseEntity<List<LoadHistory>> getHLoad() {
-        List<LoadHistory> loadHistory = loadRepository.findAll();
-        return ResponseEntity.ok(loadHistory);
+        Page<LoadHistory> page =
+                loadRepository.findAll(PageRequest.of(0, 600));
+
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/memory")
     public ResponseEntity<List<MemoryHistory>> getHMemory() {
-        List<MemoryHistory> memoryHistory = memoryRepository.findAll();
-        return ResponseEntity.ok(memoryHistory);
+        Page<MemoryHistory> page =
+                memoryRepository.findAll(PageRequest.of(0, 600));
+
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/network")
     public ResponseEntity<List<NetworkHistory>> getHNetwork() {
-        List<NetworkHistory> networkHistory = networkRepository.findAll();
-        return ResponseEntity.ok(networkHistory);
+        Page<NetworkHistory> page =
+                networkRepository.findAll(PageRequest.of(0, 600));
+
+        return ResponseEntity.ok(page.getContent());
     }
 
     @GetMapping("/sensor")
     public ResponseEntity<List<SensorHistory>> getHSensor() {
-        List<SensorHistory> sensorHistory = sensorRepository.findAll();
-        return ResponseEntity.ok(sensorHistory);
+        Page<SensorHistory> page =
+                sensorRepository.findAll(PageRequest.of(0, 600));
+
+        return ResponseEntity.ok(page.getContent());
     }
 
 }
