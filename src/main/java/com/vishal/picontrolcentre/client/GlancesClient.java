@@ -28,12 +28,18 @@ public class GlancesClient {
             String operation,
             Supplier<T> request
     ) {
+        if (request == null) {
+            throw new IllegalArgumentException(
+                    "Request supplier must not be null."
+            );
+        }
+
         try {
             T response = request.get();
 
             if (response == null) {
                 throw new GlancesUnavailableException(
-                        "Glances returned an empty response."
+                        "Glances returned an empty response for: " + operation
                 );
             }
 
@@ -41,7 +47,7 @@ public class GlancesClient {
 
         } catch (RestClientException ex) {
             throw new GlancesUnavailableException(
-                    "Unable to communicate with Glances.",
+                    "Unable to retrieve " + operation + " from Glances.",
                     ex
             );
         }
