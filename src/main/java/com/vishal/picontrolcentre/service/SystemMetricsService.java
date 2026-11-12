@@ -33,10 +33,10 @@ public class SystemMetricsService {
                 "CPU metrics"
         );
 
-        int nCores = cpuResponseresponse.cpucore();
-        double totalUsage = cpuResponseresponse.total();
-        double userUsagePercent = cpuResponseresponse.user();
-        double iowait = cpuResponseresponse.iowait();
+        int nCores = cpuResponse.cpucore();
+        double totalUsage = cpuResponse.total();
+        double userUsagePercent = cpuResponse.user();
+        double iowait = cpuResponse.iowait();
 
         return new CpuStatsResponse(nCores,totalUsage,userUsagePercent,iowait);
     }
