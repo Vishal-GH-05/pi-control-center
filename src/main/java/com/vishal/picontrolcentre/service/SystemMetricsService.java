@@ -16,9 +16,22 @@ public class SystemMetricsService {
         this.glancesClient = glancesClient;
     }
 
+    private <T> T requireResponse(T response, String operation) {
+        if (response == null) {
+            throw new IllegalStateException(
+                    "Missing Glances response for: " + operation
+            );
+        }
+
+        return response;
+    }
+
     public CpuStatsResponse getCpuStats(){
 
-        GlancesCPUResponse cpuResponseresponse = glancesClient.getCpu();
+        GlancesCPUResponse cpuResponse = requireResponse(
+                glancesClient.getCpu(),
+                "CPU metrics"
+        );
 
         int nCores = cpuResponseresponse.cpucore();
         double totalUsage = cpuResponseresponse.total();
@@ -30,7 +43,10 @@ public class SystemMetricsService {
 
     public MemoryStatsResponse getMemoryStats(){
 
-        GlancesMemoryResponse memoryResponse = glancesClient.getMemory();
+        GlancesMemoryResponse memoryResponse = requireResponse(
+                glancesClient.getMemory(),
+                "memory metrics"
+        );
 
         long total = memoryResponse.total();
         long free = memoryResponse.free();
@@ -43,7 +59,10 @@ public class SystemMetricsService {
 
     public LoadStatsResponse getLoadStats(){
 
-        GlancesLoadResponse loadResponse = glancesClient.getLoad();
+        GlancesLoadResponse loadResponse = requireResponse(
+                glancesClient.getLoad(),
+                "load metrics"
+        );
 
         double min1 = loadResponse.min1();
         double min5 = loadResponse.min5();
@@ -53,32 +72,43 @@ public class SystemMetricsService {
 
     }
 
-    public NetworkStatsResponse getNetworkStats(){
+    public NetworkStatsResponse getNetworkStats() {
 
-        List<GlancesNetworkResponse> networkResponse = glancesClient.getNetwork();
+        List<GlancesNetworkResponse> networkResponse =
+                glancesClient.getNetwork();
 
-        GlancesNetworkResponse result = null;
-
-        Optional<GlancesNetworkResponse> response = networkResponse.stream()
-                .filter(x -> x.interface_name().equalsIgnoreCase("eth0"))
-                .findFirst();
-
-        if(response.isPresent()){
-            result = response.get();
+        if (networkResponse == null || networkResponse.isEmpty()) {
+            throw new IllegalStateException(
+                    "Glances returned no network interfaces."
+            );
         }
 
-        String name = result.interface_name();
-        double recvRatePerSec = result.bytes_recv_rate_per_sec();
-        double sentRatePerSec = result.bytes_sent_rate_per_sec();
+        GlancesNetworkResponse result = networkResponse.stream()
+                .filter(x -> x != null)
+                .filter(x -> "eth0".equalsIgnoreCase(x.interface_name()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException(
+                        "Network interface eth0 is not available."
+                ));
 
-        return new NetworkStatsResponse(name, recvRatePerSec, sentRatePerSec);
+        return new NetworkStatsResponse(
+                result.interface_name(),
+                result.bytes_recv_rate_per_sec(),
+                result.bytes_sent_rate_per_sec()
+        );
     }
 
     public List<SensorStatsResponse> getSensorStats(){
 
-        List<GlancesSensorResponse> sensorResponses = glancesClient.getSensors();
+        List<GlancesSensorResponse> sensorResponses =
+                requireResponse(
+                        glancesClient.getSensors(),
+                        "sensor metrics"
+                );
 
         return sensorResponses.stream()
+                .filter(x -> x != null)
+                .filter(x -> x.label() != null)
                 .filter(x -> x.label().equalsIgnoreCase("cpu_thermal 0"))
                 .map(x -> new SensorStatsResponse(
                         x.label(),

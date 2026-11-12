@@ -9,13 +9,14 @@ public class GlancesStartupChecker implements ApplicationRunner {
 
     private final GlancesStatusMonitor statusMonitor;
 
-    public GlancesStartupChecker(GlancesStatusMonitor statusMonitor){
+    public GlancesStartupChecker(
+            GlancesStatusMonitor statusMonitor
+    ) {
         this.statusMonitor = statusMonitor;
     }
 
-
     @Override
-    public void run(ApplicationArguments args){
+    public void run(ApplicationArguments args) {
         statusMonitor.startupChecker();
     }
 }
